@@ -1202,6 +1202,7 @@ const state = {
 
   openChannels: new Set(),
   closedPackLogs: new Set(),
+  selectedPackLogs: new Set(),
 
   channels: [],
   messageParts: [],
@@ -1428,6 +1429,7 @@ async function loadFile(file) {
   state.loadedAt = new Date();
   state.headers = rows[headerRow].map((header) => String(header).trim());
   state.rows = rows.slice(headerRow + 1);
+  
   state.columnIndex = detectColumns(state.headers);
   state.selectedMarketplaces.clear();
   state.showAllMarketplaces = true;
@@ -1435,6 +1437,7 @@ async function loadFile(file) {
   state.missingOnly = false;
   state.openChannels = new Set();
   state.closedPackLogs = new Set();
+  state.selectedPackLogs.clear();
   $('#searchInput').value = '';
 
   buildOrders();
@@ -1769,20 +1772,32 @@ function buildPicklist(channels) {
   const title = (state.settings.title || 'Dispatch list').trim();
 
   const sections = channels.map((channel) => {
-    const tables = channel.dates
-      .flatMap((day) => day.packLogs.map((packLog) => picklistTableHtml(day, packLog)))
-      .join('');
+    const hasSelections = channel.dates.some(day => 
+      day.packLogs.some(pl => state.selectedPackLogs.has(`${channel.name}|${pl.key}`))
+    );
+
+    const filteredLogs = channel.dates.flatMap((day) => {
+      const logs = hasSelections 
+        ? day.packLogs.filter((pLog) => state.selectedPackLogs.has(`${channel.name}|${pLog.key}`))
+        : day.packLogs;
+      return logs.map((pLog) => ({ day, pLog }));
+    });
+
+    if (filteredLogs.length === 0) return '';
+
+    const tables = filteredLogs.map(({ day, pLog }) => picklistTableHtml(day, pLog)).join('');
+    const totalPcs = filteredLogs.reduce((sum, { pLog }) => sum + sumQty(pLog.orders), 0);
 
     return `
     <section class="picklist-channel">
-      <h2>${escapeHtml(channel.name)} <span>· ${pieces(sumQty(channel.orders))}</span></h2>
+      <h2>${escapeHtml(channel.name)} <span>· ${pieces(totalPcs)}</span></h2>
       ${tables}
     </section>`;
-  }).join('');
+  }).filter(Boolean).join('');
 
   $('#picklist').innerHTML = `
     <p class="picklist-meta">${escapeHtml(title)}${date ? ` · ${escapeHtml(date)}` : ''} · printed ${escapeHtml(formatNow())}</p>
-    ${sections}`;
+    ${sections || '<p>No pack logs selected.</p>'}`;
 }
 
 /* ==========================================================================
@@ -1946,6 +1961,7 @@ function packLogHtml(channel, channelIndex, date, dateIndex, packLog, packLogInd
         <details class="pack-log" data-key="${escapeHtml(key)}"${isOpen ? ' open' : ''}>
           <summary class="pack-log-summary">
             <span class="chevron" aria-hidden="true"></span>
+            <input type="checkbox" class="pack-log-select" data-key="${escapeHtml(key)}" title="Select for printing" ${state.selectedPackLogs.has(key) ? 'checked' : ''} style="width: 16px; height: 16px; margin: 0 6px; accent-color: var(--accent);">
             <span class="pack-log-name">${name}</span>
             <span class="pack-log-count">${pieces(sumQty(packLog.orders))}</span>
             <button type="button" class="btn-mini" data-action="copy-pack-log"
@@ -2192,8 +2208,13 @@ channelList.addEventListener('toggle', (event) => {
   }
 }, true);
 
-// Copy and print buttons inside channel cards; click a cell to copy its value
+
 channelList.addEventListener('click', (event) => {
+  if (event.target.classList.contains('pack-log-select')) {
+    event.stopPropagation();
+    return;
+  }
+
   const button = event.target.closest('[data-action]');
 
   if (button) {
@@ -2222,6 +2243,18 @@ channelList.addEventListener('click', (event) => {
   const cell = event.target.closest('[data-copy]');
   if (cell) copyText(cell.dataset.copy, `Copied ${cell.dataset.copy}`);
 });
+
+channelList.addEventListener('change', (event) => {
+  if (event.target.classList.contains('pack-log-select')) {
+    const key = event.target.dataset.key;
+    if (event.target.checked) {
+      state.selectedPackLogs.add(key);
+    } else {
+      state.selectedPackLogs.delete(key);
+    }
+  }
+});
+
 
 // Message options
 $('#titleInput').addEventListener('input', (event) => {
