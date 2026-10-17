@@ -1195,7 +1195,8 @@ const state = {
   orders: [],
   mainDate: '',
 
-  marketplace: 'all',
+  selectedMarketplaces: new Set(),
+  showAllMarketplaces: true,
   search: '',
   missingOnly: false,
 
@@ -1428,7 +1429,8 @@ async function loadFile(file) {
   state.headers = rows[headerRow].map((header) => String(header).trim());
   state.rows = rows.slice(headerRow + 1);
   state.columnIndex = detectColumns(state.headers);
-  state.marketplace = 'all';
+  state.selectedMarketplaces.clear();
+  state.showAllMarketplaces = true;
   state.search = '';
   state.missingOnly = false;
   state.openChannels = new Set();
@@ -1437,7 +1439,7 @@ async function loadFile(file) {
 
   buildOrders();
   renderAll();
-  showToast(`Loaded ${state.orders.length} orders from ${file.name}`);
+  showToast(`Loaded ${state.orders.length} orders from${file.name}`);
 }
 
 /* ==========================================================================
@@ -1539,7 +1541,7 @@ function mainDateLabel() {
 function visibleOrders() {
   const query = state.search.trim().toLowerCase();
   return state.orders.filter((order) => {
-    if (state.marketplace !== 'all' && order.marketplace !== state.marketplace) return false;
+    if (!state.showAllMarketplaces && !state.selectedMarketplaces.has(order.marketplace)) return false;
     if (state.missingOnly && !order.isMissing) return false;
     if (query && !`${order.sku} ${order.ship} ${order.packLog}`.toLowerCase().includes(query)) return false;
     return true;
@@ -1865,7 +1867,14 @@ function render() {
 
 function renderPressedChips() {
   document.querySelectorAll('#marketplaces .chip').forEach((chip) => {
-    const pressed = chip.dataset.missing ? state.missingOnly : chip.dataset.marketplace === state.marketplace;
+    let pressed;
+    if (chip.dataset.missing) {
+      pressed = state.missingOnly;
+    } else if (chip.dataset.marketplace === 'all') {
+      pressed = state.showAllMarketplaces;
+    } else {
+      pressed = state.selectedMarketplaces.has(chip.dataset.marketplace);
+    }
     chip.setAttribute('aria-pressed', String(pressed));
   });
 }
@@ -1968,7 +1977,7 @@ function renderMessage(orders) {
   const parts = buildMessage(state.channels);
   state.messageParts = parts;
 
-  const scope = state.marketplace === 'all' ? 'All marketplaces' : state.marketplace;
+  const scope = state.showAllMarketplaces ? 'All marketplaces' : Array.from(state.selectedMarketplaces).join(', ');
   $('#messageScope').textContent = `${scope} · ${pieces(sumQty(orders))}`;
   $('#messagePreview').value = parts.length > 1
     ? parts.join('\n\n──────── next message ────────\n\n')
@@ -2113,14 +2122,30 @@ $('#columnMap').addEventListener('change', (event) => {
 $('#marketplaces').addEventListener('click', (event) => {
   const chip = event.target.closest('.chip');
   if (!chip) return;
+
   if (chip.dataset.missing) {
     state.missingOnly = !state.missingOnly;
   } else {
-    state.marketplace = chip.dataset.marketplace;
+    const mp = chip.dataset.marketplace;
+    if (mp === 'all') {
+      state.showAllMarketplaces = true;
+      state.selectedMarketplaces.clear();
+    } else {
+      state.showAllMarketplaces = false;
+      if (state.selectedMarketplaces.has(mp)) {
+        state.selectedMarketplaces.delete(mp);
+        if (state.selectedMarketplaces.size === 0) {
+          state.showAllMarketplaces = true;
+        }
+      } else {
+        state.selectedMarketplaces.add(mp);
+      }
+    }
     state.missingOnly = false;
   }
   render();
 });
+
 
 // Toolbar
 $('#searchInput').addEventListener('input', (event) => {
